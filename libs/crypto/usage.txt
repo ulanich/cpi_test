@@ -1,0 +1,29 @@
+int result;
+	  	const unsigned char iv[] = {0xca, 0xfe, 0xba, 0xbe, 0xfa, 0xce, 0xdb, 0xad, 0xde, 0xca, 0xf8, 0x88};//initialization vector need to be uniq for each encoding. May be transmitted unencrypted
+	  	unsigned char* plaintext = "\"Surfing Bird\" is a song performed by American surf rock band the Trashmen, and it is also the name of the album that featured t";
+	  	unsigned char* key = "verywowpasswordsuchbigverystrong";
+	  	unsigned char aad [16]= "by Oleg Moroz___"; //Additional Authenticated Data - some kind of a data for authenticate. May be transmitted unencrypted.
+
+		unsigned char crypt_buf[128] = {0,};
+	    unsigned char plain_buf[129] ={0,};
+	    unsigned char tag_buf[16] = {0,};
+	    memset(tag_buf,0,16);
+
+
+	    result = aes_gcm_ae(key, 32,		//key and its len
+	                        iv, sizeof(iv), //IV and its len
+							plaintext, 128, //plain text and it len
+	                        aad, 16, 		//aad and it len
+	                        crypt_buf, tag_buf); //buffer for cyphertext and aad
+
+	    printf("encryption result %d\n",result);
+
+	    result = aes_gcm_ad(key, 32,
+	                        iv, sizeof(iv),
+							crypt_buf, 128,
+	                        aad, 16,
+	                        tag_buf, plain_buf);
+
+	    printf("\ndecryption result %d\n",result);
+
+	    printf(plain_buf);
