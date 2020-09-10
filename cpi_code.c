@@ -399,7 +399,16 @@ return CPI_DECODE_OK;
   {
   	memcpy(keybuffer,Knew,32);
   }
-
+  uint8_t K0_old[32]={0};
+  void CryptoGetK0_oldAESKey(uint8_t *keybuffer)
+  {
+  	memcpy(keybuffer,K0_old,32);
+  }
+  uint8_t Kt_old[32]={0};
+  void CryptoGetKt_oldAESKey(uint8_t *keybuffer)
+  {
+  	memcpy(keybuffer,Kt_old,32);
+  }
   int CRYPTO_ProcessCommand(ts_cmdStruct *cmd)
   {
 
@@ -459,7 +468,6 @@ return CPI_DECODE_OK;
 
 		for (int i =0;i<3;i++)
 		{
-			tsRCD rcd = {0};
 			rcd.header.wc = 31;
 			rcd.header.id= 43;
 			rcd.header.addinfo= i;
@@ -469,7 +477,7 @@ return CPI_DECODE_OK;
 				memcpy(crcstream+2+64*i, downstream+i*62, 60);
 				uint16_t crc =  crc16_ccitt(crcstream,190);
 				memcpy(rcd.b,downstream+i*62,60);
-				memcpy(rcd.b,crc,2);
+				memcpy(rcd.b+60,&crc,2);
 			}
 			else
 			{
@@ -478,6 +486,7 @@ return CPI_DECODE_OK;
 				memcpy(rcd.b,downstream+i*62,62);
 			}
 		}
+	}
 
 	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_GCM)
 		{
@@ -496,7 +505,9 @@ return CPI_DECODE_OK;
 
 			unsigned char plain_buf[50] = {0,};
 
-			if (err == aes_gcm_ad(Knew, 32, iv, 4, data, 50, aad, 2, tag, 8, plain_buf))
+			err = aes_gcm_ad(Knew, 32, iv, 4, data, 50, aad, 2, tag, 8, plain_buf);
+
+			if (err != 0)
 			{
 				return err;
 			}
@@ -505,29 +516,29 @@ return CPI_DECODE_OK;
 			{
 				volatile uint8_t plain_text[50] = {0,};
 				memcpy(plain_text,Nst,16);
-				tsRCD rcd = {0};
 				rcd.header.wc = 31;
-				if ((aad[0] & 0x3f) == 8) rcd.header.id= 44;
-				else if ((aad[0] & 0x3f) == 11) rcd.header.id= 47;
-				else return err;
+				rcd.header.id= 47;
 				rcd.header.addinfo= 0;
+				if ((aad[0] & 0x3f) == 8) rcd.header.id= 44;
+
 				memcpy(aad,&rcd.header,2);
 				memcpy(iv,downstream+58,4);
-				if (err == aes_gcm_ae(Knew, 32, iv, 4, plain_text, 50, aad, 2, crypt_buf, tag))
+				err = aes_gcm_ae(Knew, 32, iv, 4, plain_text, 50, aad, 2, crypt_buf, tag);
+				if (err != 0)
 				{
 					return err;
 				}
 
 				memcpy(downstream,crypt_buf,50);
 				memcpy(downstream+50,tag,8);
-
 				memcpy(rcd.b,downstream,62);
 			}
 		}
 
   	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_K0)
   	{
-  		memcpy(K0,Knew,32);
+		memcpy(K0_old,K0,32);
+		memcpy(K0,Knew,32);
   	}
 
 	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_NEW_KEY)
@@ -556,7 +567,6 @@ return CPI_DECODE_OK;
 		memcpy(downstream+2,Nsat,16);
 		memcpy(downstream+16+2,hmac,32);
 
-		tsRCD rcd = {0};
 		rcd.header.wc = 24;
 		rcd.header.id= 46;
 		rcd.header.addinfo= 0;
@@ -569,13 +579,14 @@ return CPI_DECODE_OK;
 
   	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_CUR_KEY)
   	{
-  		memcpy(currentAESKEY,Knew,32);
+		memcpy(Kt_old,currentAESKEY,32);
+		memcpy(currentAESKEY,Knew,32);
   	}
 
   	return 0;
 
   }
-  }
+
 
   void makeSharedSecred()
   {
@@ -589,8 +600,6 @@ return CPI_DECODE_OK;
   		Q_aff_st_rev.y.fp_val.val[16-i] = uswap_32(Q_aff_st.y.fp_val.val[i]);
   	}
 
-
-  	//Msg_Send(0,0);
   }
 
   void makedQ()

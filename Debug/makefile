@@ -30,19 +30,19 @@ endif
 # Add inputs and outputs from these tool invocations to the build variables 
 
 # All Target
-all: cpi_code.exe
+all: cpi_test.exe
 
 # Tool invocations
-cpi_code.exe: $(OBJS) $(USER_OBJS)
+cpi_test.exe: $(OBJS) $(USER_OBJS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: MinGW C Linker'
-	gcc -L"D:\project\cpi_code\libs" -o "cpi_code.exe" $(OBJS) $(USER_OBJS) $(LIBS)
+	gcc -L"D:\project\cpi_code\libs" -o "cpi_test.exe" $(OBJS) $(USER_OBJS) $(LIBS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) $(EXECUTABLES)$(OBJS)$(C_DEPS) cpi_code.exe
+	-$(RM) $(EXECUTABLES)$(OBJS)$(C_DEPS) cpi_test.exe
 	-@echo ' '
 
 .PHONY: all clean dependents
