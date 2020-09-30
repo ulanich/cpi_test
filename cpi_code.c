@@ -36,6 +36,22 @@ uint16_t crc16_ccitt(const uint8_t* data_p, uint32_t length)
   return crc;
 }
 
+typedef struct  __attribute__((packed))
+{
+	int32_t time;
+	uint16_t cmd;
+	union
+	{
+		uint8_t args[8];
+		uint32_t argsint[2];
+	};
+}tsCpiCmd;
+
+typedef struct  __attribute__((packed))
+{
+	tsCpiCmd cmd[3];
+}tsCpi01;
+
 typedef struct __attribute__((packed))
 {
 	uint16_t id:6;
@@ -130,6 +146,12 @@ typedef struct
 
 }ts_cmdStruct;
 
+typedef struct sCmd
+{
+	uint16_t task_node;
+	uint16_t cmd;
+}sCmd_t;
+
 typedef enum
 {
   CPI_DECODE_OK = 0, ///<Успешное декодирование КПИ
@@ -157,7 +179,7 @@ enum eCryptoTaskCmd
 };
 
 tsRCD rcd = {0};
-
+uint8_t flag_k0; // флаг для того чтобы невозможно было поменять К0 без процедуры рассчета
 /********************************************
  ****************CPI DECODE******************
  ********************************************/
@@ -186,6 +208,190 @@ uint32_t SFTY_decodeCPI06(tsCpiMainStruct *bytemsg)
     }
 
   return CPI_DECODE_OK;
+}
+
+typedef enum
+{
+	STATUS_OK=0,
+	STATUS_FAIL,
+	STATUS_INVALID_MESSAGE,
+	STATUS_TIMEDOUT,
+	STATUS_RT_BUSY,
+	STATUS_INVALID_MIL_LINE,
+	STATUS_INVALID_ARGUMENTS,
+	STATUS_CYCLOGRAM_ALREADY_STARTED,
+	STATUS_CYCLOGRAM_CORRUPTED,
+	STATUS_NODE_ID_INCORRECT,
+	STATUS_NULL_POINTER,
+	STATUS_INCORRECT_SIZE,
+	STATUS_MIL_RT_FORBIDEN,
+	STATUS_RT_BUSY_SEND_RETRY,
+	STATUS_NOT_FOUND,
+	STATUS_NO_FREE_SPACE,
+	STATUS_INCORRECT_CRC,
+	STATUS_UNKNOWN_COMMAND,
+	STATUS_OPERATION_ALREADY_IN_PROGRESS,
+}teFunctionStatus;
+
+typedef enum
+{
+	NO_TASK_NODE = 0,
+	/**
+	 * Задача ведения БШВ
+	 */
+	OBTS_TASK_NODE =1,
+	/**
+	 * Задача работы с МКО
+	 */
+	MIL_1553_DAEMON_TASK_NODE=2,
+	/**
+	 * Задача сбора ТМИ
+	 */
+	TLM_TASK_NODE=3,
+	/**
+	 * Задача обеспечения работы БКУ
+	 */
+	SFTY_TASK_NODE=4,
+	/**
+	 * Задача работы с CAN
+	 */
+	CAN_DAEMON_TASK_NODE=5,
+	/**
+	 * Задача работы с циклограммами
+	 */
+	CYC_TASK_NODE=6,
+	/**
+	 * Задача работы с полезной нагрузкой
+	 */
+
+	PLD_TASK_NODE=7,
+	/**
+	 * Задача обеспечения шифрования
+	 */
+	CRYPTO_TASK_NODE=8,
+	/**
+	 * Задча работы с АСН
+	 */
+	NAV_TASK_NODE=9,
+	/**
+	 * Задача работы СОС
+	 */
+	ADCS_OBC_TASK_NODE=10,
+	ADCS_TASK_NODE=ADCS_OBC_TASK_NODE,
+	/**
+	 * Задача работы с ЗД
+	 */
+	STR_TASK_NODE=11,
+	/**
+	 * Задача работы с памятью
+	 */
+	MEM_TASK_NODE=12,
+	/**
+	 * Задача работы с ДС
+	 */
+	SUN_SENSOR_TASK_NODE=13,
+	/**
+	 * Задача работы с КДУ
+	 */
+	VPS_TASK_NODE=14,
+	TASKS_COUNT,
+}eTaskNodes;
+
+#define CMD_TABLE_LEN	(128)
+
+sCmd_t commands_table[CMD_TABLE_LEN]={
+
+		[65] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CALC_SC_Q},
+		[66] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CALC_GCM},
+		[67] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CALC_PUBLIC},
+		[68] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_SEN_RCI},
+		[69] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CHANGE_K},
+		[70] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CALC_NEW_KEY},
+		[71] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CHANGE_CUR_KEY},
+		[72] = {CRYPTO_TASK_NODE, CMD_CRYPTO_TASK_CHANGE_K0},
+};
+
+teFunctionStatus CmdGet(uint32_t cmd, sCmd_t *c)
+{
+	if(cmd<CMD_TABLE_LEN)
+	{
+		if (c!=NULL)
+			memcpy(c, &commands_table[cmd], sizeof(sCmd_t));
+		if (c->cmd==0 && c->task_node==0)
+			return STATUS_NOT_FOUND;
+		return STATUS_OK;
+	}
+	return STATUS_INVALID_ARGUMENTS;
+}
+
+teFunctionStatus externalCmd2InternalCmd(uint16_t extcmd, sCmd_t *outcmd)
+{
+
+	teFunctionStatus res = STATUS_OK;
+	if (extcmd<256)
+	{
+		res =  CmdGet(extcmd, outcmd);
+	}
+	else if (extcmd>=256 && extcmd<512)//CAN КИР1
+	{
+		outcmd->task_node = CAN_DAEMON_TASK_NODE;
+		outcmd->cmd = extcmd;
+	}
+	else if (extcmd>=512 && extcmd<768)//CAN КИР2
+	{
+		outcmd->task_node = CAN_DAEMON_TASK_NODE;
+		outcmd->cmd = extcmd;
+	}
+	else if (extcmd>=768 && extcmd<1024)//CAN КСП
+	{
+		outcmd->task_node = CAN_DAEMON_TASK_NODE;
+		outcmd->cmd = extcmd;
+	}
+	else if (extcmd>=1024 && extcmd<1280)//CAN БКП
+	{
+		outcmd->task_node = CAN_DAEMON_TASK_NODE;
+		outcmd->cmd = extcmd;
+	}
+	else if (extcmd>=1280 && extcmd<1536)//CAN КСО
+	{
+		outcmd->task_node = CAN_DAEMON_TASK_NODE;
+		outcmd->cmd = extcmd;
+	}
+	else if (extcmd & 0xf000)//команды для задач СПО
+	{
+		eTaskNodes task = extcmd>>12;
+		uint16_t cmd = extcmd & 0x0fff;
+		outcmd->task_node = task;
+		outcmd->cmd = cmd;
+	}
+	else
+	{
+		res = STATUS_INVALID_ARGUMENTS;
+	}
+	return res;
+}
+
+uint32_t SFTY_decodeCPI01(tsCpiMainStruct *cpi)//Команды обрезано для КПИ6
+{
+	uint32_t remove = cpi->header.addinfo == 0x1f?1:0;
+	int cmdcount = cpi->header.wc/7;
+	tsCpi01 *cpi01 = (tsCpi01 *)cpi->data.b;
+
+	tsCpiCmd *cpicmd = &cpi01->cmd;
+	sCmd_t cmd;
+	teFunctionStatus res =  externalCmd2InternalCmd(cpicmd->cmd, &cmd);
+	if (res == STATUS_OK)
+	{
+		ts_cmdStruct cmdstruct = {0};
+		cmdstruct.time = cpicmd->time;
+		cmdstruct.dest = cmd.task_node;
+		cmdstruct.cmd  = cmd.cmd;
+		memcpy(cmdstruct.args,cpicmd->args, 8);
+
+		CRYPTO_ProcessCommand(&cmd);
+	}
+
+	return CPI_DECODE_OK;
 }
 
 uint32_t SFTY_decodeCPI07(tsCpiMainStruct *bytemsg)
@@ -234,63 +440,70 @@ uint32_t SFTY_decodeCPI08(tsCpiMainStruct *bytemsg)
   return CPI_DECODE_OK;
 }
 
-uint32_t SFTY_decodeCPI09(tsCpiMainStruct *bytemsg)
+uint32_t SFTY_decodeCPI09(tsCpiMainStruct *cpi)
 {
-  uint16_t command;
-  memcpy(&command,bytemsg->data.b,2);
-  ts_cmdStruct cmd;
-  if (command == 3)
-  {
-    cmd.cmd =  CMD_CRYPTO_TASK_CHANGE_K0;
-    CRYPTO_ProcessCommand(&cmd);
-  }
-
-  return CPI_DECODE_OK;
+	tsCpi01 *cpi01 = (tsCpi01 *)cpi->data.b;
+	int cmdcount = cpi->header.wc/7;
+	tsCpiCmd *cpicmd = &cpi01->cmd[0];
+	sCmd_t scmd;
+	if (cpicmd->cmd == 72 && cpi->header.id == 9)
+	{
+		teFunctionStatus res =  externalCmd2InternalCmd(cpicmd->cmd, &scmd);
+		ts_cmdStruct cmdstruct = {0};
+		cmdstruct.dest = scmd.task_node;
+		cmdstruct.cmd  = scmd.cmd;
+		memcpy(cmdstruct.args,cpicmd->args, 8);
+		CRYPTO_ProcessCommand(&scmd);
+	}
+	if (cpicmd->cmd == 71 && cpi->header.id == 12)
+	{
+		teFunctionStatus res =  externalCmd2InternalCmd(cpicmd->cmd, &scmd);
+		ts_cmdStruct cmdstruct = {0};
+		cmdstruct.dest = scmd.task_node;
+		cmdstruct.cmd  = scmd.cmd;
+		memcpy(cmdstruct.args,cpicmd->args, 8);
+		CRYPTO_ProcessCommand(&scmd);
+	}
+	return CPI_DECODE_OK;
 }
 
 uint32_t SFTY_decodeCPI10(tsCpiMainStruct *bytemsg)
 {
-  extern uint8_t data_Nst[16];
-  memcpy(data_Nst,bytemsg->data.b,16);
-  ts_cmdStruct cmd;
-  cmd.cmd = CMD_CRYPTO_TASK_CALC_NEW_KEY;
-  CRYPTO_ProcessCommand(&cmd);
+	extern uint8_t data_Nst[16];
+	memcpy(data_Nst,bytemsg->data.b,16);
+	ts_cmdStruct cmd;
+	cmd.cmd = CMD_CRYPTO_TASK_CALC_NEW_KEY;
+	CRYPTO_ProcessCommand(&cmd);
 
-  return CPI_DECODE_OK;
+	return CPI_DECODE_OK;
 }
 
 uint32_t SFTY_decodeCPI11(tsCpiMainStruct *bytemsg)
 {
-  extern uint8_t cryp_data[64];
+	extern uint8_t cryp_data[64];
 
-  memcpy(cryp_data,bytemsg,64);
-  ts_cmdStruct cmd;
-    cmd.cmd = CMD_CRYPTO_TASK_CALC_GCM;
-    CRYPTO_ProcessCommand(&cmd);
+	memcpy(cryp_data,bytemsg,64);
+	ts_cmdStruct cmd;
+	cmd.cmd = CMD_CRYPTO_TASK_CALC_GCM;
+	CRYPTO_ProcessCommand(&cmd);
 
-    return CPI_DECODE_OK;
+	return CPI_DECODE_OK;
 }
 
-uint32_t SFTY_decodeCPI12(tsCpiMainStruct *bytemsg)
+int SFTY_ProcessCPI(uint8_t *_64bytes)
 {
-uint16_t command;
-memcpy(&command,bytemsg->data.b,2);
-ts_cmdStruct cmd;
-if (command == 2)
-{
-  cmd.cmd =  CMD_CRYPTO_TASK_CHANGE_CUR_KEY;
-  CRYPTO_ProcessCommand(&cmd);
-}
-
-return CPI_DECODE_OK;
-}
-
-  int SFTY_ProcessCPI(uint8_t *_64bytes)
-  {
-    tsCpiMainStruct *cpi = _64bytes;
+	tsCpiMainStruct *cpi = _64bytes;
+	#define IV_LEN__ (12)
+	uint8_t iv[IV_LEN__] = {0};
+	memcpy(iv,cpi->IV,4);
 	uint8_t currentkey[32];
 	uint8_t decrypt[50];
 	uint32_t identifier = cpi->header.id;
+
+	if (identifier != 9)
+	{
+		flag_k0 = 0;
+	}
 
 	if(identifier == 7 || identifier == 10)
 	{
@@ -313,7 +526,7 @@ return CPI_DECODE_OK;
 		else						CryptoGetCurrentAESKey(currentkey);
 
 		int res=aes_gcm_ad(currentkey,32, //KEY
-				(uint8_t*)cpi->IV,4,//IV
+				(uint8_t*)iv,IV_LEN__,//IV
 				(uint8_t*)cpi->data.b,50,//Cypher text
 				(uint8_t*)&cpi->header,2, //AAD
 				(uint8_t *)cpi->MAC, 8,//MAC
@@ -327,38 +540,32 @@ return CPI_DECODE_OK;
 		memcpy(cpi->data.b,decrypt,50);
 	}
 
-    if (identifier == 6)
-    {
-      return SFTY_decodeCPI06(cpi);
-    }
-    else if (identifier == 7)
-    {
-      return SFTY_decodeCPI07(cpi);
-    }
-    else if (identifier == 8)
-    {
-      return SFTY_decodeCPI08(cpi);
-    }
-    else if (identifier == 9)
-    {
-      return SFTY_decodeCPI09(cpi);
-    }
-    else if (identifier == 10)
-    {
-      return SFTY_decodeCPI10(cpi);
-    }
-    else if (identifier == 11)
-    {
-      return SFTY_decodeCPI11(cpi);
-    }
-    else if (identifier == 12)
-    {
-      return SFTY_decodeCPI12(cpi);
-    }
-
-
-    return CPI_UNKNOWN_ID;
-  }
+	if (identifier == 1 || identifier == 6) // 6 кпи аналогично 1 - му, поэтому решили сократить количество
+	{
+		return SFTY_decodeCPI01(cpi);
+	}
+	else if (identifier == 7)
+	{
+	  return SFTY_decodeCPI07(cpi);
+	}
+	else if (identifier == 8)
+	{
+	  return SFTY_decodeCPI08(cpi);
+	}
+	else if (identifier == 9 || identifier == 12) // аналогично с 9 и 12
+	{
+		return SFTY_decodeCPI09(cpi);
+	}
+	else if (identifier == 10)
+	{
+		return SFTY_decodeCPI10(cpi);
+	}
+	else if (identifier == 11)
+	{
+		return SFTY_decodeCPI11(cpi);
+	}
+	return CPI_UNKNOWN_ID;
+}
   /********************************************
    ****************CRYPTO**********************
    ********************************************/
