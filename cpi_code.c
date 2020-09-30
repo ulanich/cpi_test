@@ -569,79 +569,118 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
   /********************************************
    ****************CRYPTO**********************
    ********************************************/
+	typedef enum
+	{
+		IV_K0,
+		IV_Q_Kt,
+		IV_I_Kt
+	}teIVType;
 
-  prj_pt Q_sat;
-  aff_pt Q_aff_sat;
-  aff_pt Q_aff_sat_rev;
+	#define _IV_LEN_ (12)
+	#define CRYPTO_Q_L (10)
 
-  prj_pt Q_st;
-  aff_pt Q_aff_st;
-  aff_pt Q_aff_st_rev;
+	prj_pt Q_sat;
+	aff_pt Q_aff_sat;
+	aff_pt Q_aff_sat_rev;
 
-  uint8_t Nsat[16];
-  uint8_t Nst[16];
+	prj_pt Q_st;
+	aff_pt Q_aff_st;
+	aff_pt Q_aff_st_rev;
 
-  nn_t d_sat;
+	uint8_t Nsat[16];
+	uint8_t Nst[16];
+	nn_t d_sat;
 
-  ec_params curve_params;
-  nn d_satellite;
-  ec_str_params *the_curve_const_parameters;
+	ec_params curve_params;
+	nn d_satellite;
+	ec_str_params *the_curve_const_parameters;
 
-  uint8_t DH_stationQNst[DH_KEY_SIZE*DH_KEYS_COUNT+16+2];
-  uint8_t cryp_data[64];
-  uint8_t data_Nst[16];
+	uint8_t DH_stationQNst[DH_KEY_SIZE*DH_KEYS_COUNT+16+2];
+	uint8_t cryp_data[64];
+	uint8_t data_Nst[16];
 
-  uint8_t currentAESKEY[32]="verywowpasswordsuchbigverystrong";
-  void CryptoGetCurrentAESKey(uint8_t *keybuffer)
-  {
-  	memcpy(keybuffer,currentAESKEY,32);
-  }
-  uint8_t K0[32]={0};
-  void CryptoGetK0AESKey(uint8_t *keybuffer)
-  {
-  	memcpy(keybuffer,K0,32);
-  }
-  uint8_t Knew[32] = {0};
-  void CryptoGetKnewAESKey(uint8_t *keybuffer)
-  {
-  	memcpy(keybuffer,Knew,32);
-  }
-  uint8_t K0_old[32]={0};
-  void CryptoGetK0_oldAESKey(uint8_t *keybuffer)
-  {
-  	memcpy(keybuffer,K0_old,32);
-  }
-  uint8_t Kt_old[32]={0};
-  void CryptoGetKt_oldAESKey(uint8_t *keybuffer)
-  {
-  	memcpy(keybuffer,Kt_old,32);
-  }
-  int CRYPTO_ProcessCommand(ts_cmdStruct *cmd)
-  {
+	uint8_t currentAESKEY[34]=
+	{
+			[0 ... 31] =0xaa
+	};
+	void CryptoGetCurrentAESKey(uint8_t *keybuffer)
+	{
+		memcpy(keybuffer,currentAESKEY,32);
+	}
+	uint8_t K0[34]=
+	{
+			[0 ... 31] =0xaa
+	};
+	void CryptoGetK0AESKey(uint8_t *keybuffer)
+	{
+		memcpy(keybuffer,K0,32);
+	}
+	uint8_t Knew[32] = {0};
+	void CryptoGetKnewAESKey(uint8_t *keybuffer)
+	{
+		memcpy(keybuffer,Knew,32);
+	}
 
-  	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_PUBLIC)
-  	{
-  		makedQ(); // формируем открытый ключ
-  		get_random(Nsat, 16); // криптоустойчивый рандомизатор
-  	}
+	uint32_t __IV_K0__ = 0x00000000;
 
-  	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_SC_Q)
-  	{
-  		prj_pt_init(&Q_st,&(curve_params.ec_curve));
-  		uint32_t *dhix = (uint32_t *) (DH_stationQNst);
-  		uint32_t *dhiy = (uint32_t *) (DH_stationQNst+68);
-  		uint32_t *dhiz = (uint32_t *) (DH_stationQNst+136);
-  		memcpy(Nst,DH_stationQNst+204,16);
+	uint32_t __IV_Q_Kt__ = 0x40000000;
+	uint32_t __IV_I_Kt__ = 0x80000000;
 
-  		for (int i =0;i<17;i++)
-  		{
-  			Q_st.X.fp_val.val[16-i] = uswap_32(dhix[i]);
-  			Q_st.Y.fp_val.val[16-i] = uswap_32(dhiy[i]);
-  			Q_st.Z.fp_val.val[16-i] = uswap_32(dhiz[i]);
-  		}
-  		makeSharedSecred();
 
-  	}
+	uint32_t CryptoGetIV(teIVType type)
+	{
+		uint32_t result = 0;
+		//xSemaphoreTake(CryptoMutex, 0xffffffff);
+		if (type == IV_K0)
+			result= __IV_K0__++;
+		else if (type == IV_Q_Kt)
+			result = __IV_Q_Kt__++;
+		else if (type == IV_I_Kt)
+			result = __IV_I_Kt__++;
+		//xSemaphoreGive(CryptoMutex);
+
+		return result;
+
+	}
+
+	void CryptoSetIV(teIVType type, uint32_t newIV)
+	{
+		//xSemaphoreTake(CryptoMutex, 0xffffffff);
+		if (type == IV_K0)
+			__IV_K0__= newIV;
+		else if (type == IV_Q_Kt)
+			__IV_Q_Kt__= newIV;
+		else if (type == IV_I_Kt)
+			__IV_I_Kt__= newIV;
+		//xSemaphoreGive(CryptoMutex);
+	}
+
+	int CRYPTO_ProcessCommand(ts_cmdStruct *cmd)
+	{
+
+	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_PUBLIC)
+	{
+		makedQ(); // формируем открытый ключ
+		get_random(Nsat, 16); // криптоустойчивый рандомизатор
+	}
+
+	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_SC_Q)
+	{
+		prj_pt_init(&Q_st,&(curve_params.ec_curve));
+		uint32_t *dhix = (uint32_t *) (DH_stationQNst);
+		uint32_t *dhiy = (uint32_t *) (DH_stationQNst+68);
+		uint32_t *dhiz = (uint32_t *) (DH_stationQNst+136);
+		memcpy(Nst,DH_stationQNst+204,16);
+
+		for (int i =0;i<17;i++)
+		{
+			Q_st.X.fp_val.val[16-i] = uswap_32(dhix[i]);
+			Q_st.Y.fp_val.val[16-i] = uswap_32(dhiy[i]);
+			Q_st.Z.fp_val.val[16-i] = uswap_32(dhiz[i]);
+		}
+		makeSharedSecred();
+
+	}
 
 	if (cmd->cmd == CMD_CRYPTO_TASK_SEN_RCI)
 	{
@@ -676,8 +715,8 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 		for (int i =0;i<3;i++)
 		{
 			rcd.header.wc = 31;
-			rcd.header.id= 43;
-			rcd.header.addinfo= i;
+			rcd.header.id= 2;
+			rcd.header.addinfo= 7;
 			if (i==2)
 			{
 				memcpy(crcstream+64*i, &rcd.header, 2);
@@ -697,8 +736,10 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 
 	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_GCM)
 		{
+
+			uint32_t IVint;
 			uint8_t downstream[62] = {0};
-			volatile uint8_t iv[4] = {0};
+			volatile uint8_t iv[_IV_LEN_] = {0};
 			volatile uint8_t data[50] = {0};
 			volatile uint8_t tag[16] = {0};
 			volatile uint8_t aad [2] = {0};
@@ -712,7 +753,7 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 
 			unsigned char plain_buf[50] = {0,};
 
-			err = aes_gcm_ad(Knew, 32, iv, 4, data, 50, aad, 2, tag, 8, plain_buf);
+			err = aes_gcm_ad(Knew, 32, iv, _IV_LEN_, data, 50, aad, 2, tag, 8, plain_buf);
 
 			if (err != 0)
 			{
@@ -724,13 +765,24 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 				volatile uint8_t plain_text[50] = {0,};
 				memcpy(plain_text,Nst,16);
 				rcd.header.wc = 31;
-				rcd.header.id= 47;
-				rcd.header.addinfo= 0;
-				if ((aad[0] & 0x3f) == 8) rcd.header.id= 44;
+				rcd.header.id= 2;
+
+				if ((aad[0] & 0x3f) == 8)
+				{
+						rcd.header.addinfo= 8;
+						flag_k0 = 1;
+						IVint = CryptoGetIV(IV_K0);
+				}
+				else
+				{
+					rcd.header.addinfo = 11;
+					IVint = CryptoGetIV(IV_Q_Kt);
+					IVint = CryptoGetIV(IV_I_Kt);
+				}
 
 				memcpy(aad,&rcd.header,2);
-				memcpy(iv,downstream+58,4);
-				err = aes_gcm_ae(Knew, 32, iv, 4, plain_text, 50, aad, 2, crypt_buf, tag);
+				memcpy(iv,&IVint,4);
+				err = aes_gcm_ae(Knew, 32, iv, _IV_LEN_, plain_text, 50, aad, 2, crypt_buf, tag);
 				if (err != 0)
 				{
 					return err;
@@ -738,15 +790,20 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 
 				memcpy(downstream,crypt_buf,50);
 				memcpy(downstream+50,tag,8);
+				memcpy(downstream+50+8,iv,4);
 				memcpy(rcd.b,downstream,62);
 			}
 		}
 
-  	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_K0)
-  	{
-		memcpy(K0_old,K0,32);
-		memcpy(K0,Knew,32);
-  	}
+	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_K0)
+	{
+		if(flag_k0 == 1)
+		{
+			memcpy(K0,Knew,32);
+			flag_k0 = 0;
+			CryptoSetIV(IV_K0, 0);
+		}
+	}
 
 	if (cmd->cmd == CMD_CRYPTO_TASK_CALC_NEW_KEY)
 	{
@@ -775,8 +832,8 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 		memcpy(downstream+16+2,hmac,32);
 
 		rcd.header.wc = 24;
-		rcd.header.id= 46;
-		rcd.header.addinfo= 0;
+		rcd.header.id= 2;
+		rcd.header.addinfo= 10;
 		memcpy(downstream, &rcd.header, 2);
 		uint16_t crc =  crc16_ccitt(downstream, 62);
 		memcpy(downstream+62, &crc, 2);
@@ -784,15 +841,16 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 
 	}
 
-  	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_CUR_KEY)
-  	{
-		memcpy(Kt_old,currentAESKEY,32);
+	if (cmd->cmd == CMD_CRYPTO_TASK_CHANGE_CUR_KEY)
+	{
 		memcpy(currentAESKEY,Knew,32);
-  	}
+		CryptoSetIV(IV_I_Kt, 0);
+		CryptoSetIV(IV_Q_Kt, 0);
+	}
 
-  	return 0;
+	return 0;
 
-  }
+	}
 
 
   void makeSharedSecred()
