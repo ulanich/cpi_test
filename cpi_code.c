@@ -715,8 +715,8 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 		for (int i =0;i<3;i++)
 		{
 			rcd.header.wc = 31;
-			rcd.header.id= 2;
-			rcd.header.addinfo= 7;
+			rcd.header.id= 27;
+			rcd.header.addinfo= i+1;
 			if (i==2)
 			{
 				memcpy(crcstream+64*i, &rcd.header, 2);
@@ -769,13 +769,15 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 
 				if ((aad[0] & 0x3f) == 8)
 				{
-						rcd.header.addinfo= 8;
+						rcd.header.id= 28;
+						rcd.header.addinfo= 0;
 						flag_k0 = 1;
 						IVint = CryptoGetIV(IV_K0);
 				}
 				else
 				{
-					rcd.header.addinfo = 11;
+					rcd.header.id= 31;
+					rcd.header.addinfo = 0;
 					IVint = CryptoGetIV(IV_Q_Kt);
 					IVint = CryptoGetIV(IV_I_Kt);
 				}
@@ -832,8 +834,8 @@ int SFTY_ProcessCPI(uint8_t *_64bytes)
 		memcpy(downstream+16+2,hmac,32);
 
 		rcd.header.wc = 24;
-		rcd.header.id= 2;
-		rcd.header.addinfo= 10;
+		rcd.header.id= 30;
+		rcd.header.addinfo= 0;
 		memcpy(downstream, &rcd.header, 2);
 		uint16_t crc =  crc16_ccitt(downstream, 62);
 		memcpy(downstream+62, &crc, 2);
